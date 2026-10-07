@@ -275,7 +275,7 @@ export function DeployBotDialog({
     () => `bot_${new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "").slice(0, 15)}`,
   );
   const [accountName, setAccountName] = useState("master_account");
-  const [image, setImage] = useState("hummingbot/hummingbot:latest");
+  const [image, setImage] = useState("local/hummingbot:cb588082");
   const [maxGlobalDrawdown, setMaxGlobalDrawdown] = useState("");
   const [maxControllerDrawdown, setMaxControllerDrawdown] = useState("");
 

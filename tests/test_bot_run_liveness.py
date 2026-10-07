@@ -32,7 +32,7 @@ DEPLOYED = {
         "btcbrl-sell__alloc_5_tp_3bp",
         "btcbrl-sell__alloc_10_tp_5bp",
     ],
-    "image": "hummingbot/hummingbot:latest",
+    "image": "local/hummingbot:cb588082",
 }
 
 

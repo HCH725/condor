@@ -546,7 +546,7 @@ async def deploy_bot(
     account_name: str | None = "master_account",
     max_global_drawdown_quote: float | None = None,
     max_controller_drawdown_quote: float | None = None,
-    image: str = "hummingbot/hummingbot:latest",
+    image: str = "local/hummingbot:cb588082",
 ) -> dict[str, Any]:
     """
     Deploy a bot with specified controller configurations.
