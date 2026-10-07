@@ -614,7 +614,7 @@ class DeployBotRequest(BaseModel):
     bot_name: str
     controllers_config: list[str]
     account_name: str = "master_account"
-    image: str = "hummingbot/hummingbot:latest"
+    image: str = "local/hummingbot:cb588082"
     max_global_drawdown_quote: float | None = None
     max_controller_drawdown_quote: float | None = None
 
