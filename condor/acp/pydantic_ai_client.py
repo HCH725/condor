@@ -449,6 +449,7 @@ class PydanticAIClient:
         self.extra_env = extra_env
         self.base_url = base_url
         self.api_key = api_key
+        self._opencode_session_id = str(uuid.uuid4())
         # False when ``base_url`` is a caller-chosen URL (a loop's
         # ``model_base_url``): the install's OPENROUTER_API_KEY /
         # CUSTOM_LLM_API_KEY must never ride along to it — only a key the
@@ -590,10 +591,22 @@ class PydanticAIClient:
                 os.environ.get("CUSTOM_LLM_API_KEY") if self.env_keys_allowed else None
             )
             api_key = self.api_key or env_key or "not-needed"
+            endpoint = urlparse(base_url)
+            go_options: dict[str, Any] = {}
+            if endpoint.hostname == "opencode.ai" and endpoint.path.rstrip("/") in (
+                "/inference/go/v1",
+                "/inference/go/openai/v1",
+            ):
+                # Stable for this conversation/client; a new client gets its own ID.
+                go_options["default_headers"] = {
+                    "x-opencode-session": self._opencode_session_id,
+                    "User-Agent": "condor/0.1.0",
+                }
             openai_client = AsyncOpenAI(
                 base_url=base_url,
                 api_key=api_key,
                 timeout=_local_timeout,
+                **go_options,
             )
             return _make_openai_compat_model(
                 model_id, OpenAIProvider(openai_client=openai_client)
