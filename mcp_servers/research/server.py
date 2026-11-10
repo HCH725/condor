@@ -75,7 +75,10 @@ the interactive chart is a report readable with `get_report`.
 This surface is read-only apart from starting a backtest. It cannot place
 orders, execute arbitrary code, create routines, schedule anything, or change
 server settings. Do not claim a run succeeded until `backtest_status` reports a
-terminal status with no error.
+terminal status with no error. If a routine instance disappears after a Condor
+restart, recover its saved task with `get_backtest`; do not resubmit a backtest
+just because its in-memory instance is gone. Old/pruned/unlinked reports are
+reported as report_id=null instead of guessed from titles or timestamps.
 """
 
 mcp = MCPServer("condor_research", instructions=_INSTRUCTIONS)
@@ -432,18 +435,36 @@ async def list_backtests(server_name: str = "local", limit: int = 20) -> dict:
 
 @_tool
 async def get_backtest(task_id: str) -> dict:
-    """Read one archived backtest's parameters and metrics.
+    """Read archived metrics and recover the report link after a Condor restart.
 
-    The run's chart payload can be very large, so this returns the index summary
-    only; open the dashboard to read the chart, or use `get_report` when the run
-    produced a report id.
+    Only the small archive and report indexes are read, never chart payloads.
+    A legacy or pruned report has report_id=None; no title/time guessing.
     """
     tid = _clean_id(task_id, "task_id")
     archive = await call_main_api("GET", "/backtesting/archive")
     summaries = archive.get("summaries", []) if isinstance(archive, dict) else []
     for entry in summaries:
         if isinstance(entry, dict) and entry.get("task_id") == tid:
-            return _summary_row(entry)
+            linked = await call_main_api(
+                "GET", f"/backtesting/archive/{quote(tid, safe='')}/reports"
+            )
+            if not isinstance(linked, dict) or not isinstance(
+                linked.get("reports"), list
+            ):
+                raise ToolError(
+                    "Invalid report lookup response; check the Condor version"
+                )
+            reports = linked["reports"]
+            rid = _clean_id(reports[0]["id"], "report_id") if reports else None
+            return {
+                **_summary_row(entry),
+                "report_id": rid,
+                "dashboard_url": (
+                    f"{_dashboard_url()}/routines?routine={ROUTINE_NAME}&report={rid}"
+                    if rid
+                    else None
+                ),
+            }
     raise ToolError(f"backtest {tid!r} is not in the archive")
 
 

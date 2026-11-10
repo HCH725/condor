@@ -1,7 +1,8 @@
 """The backtest archive, and nothing else.
 
-Three routes over local data. Launching a backtest is the ``backtest_chart``
-routine's job from every seat, the dashboard included (FEAT-076), so this module
+Archive reads/deletes and durable report lookup over local data. Launching a
+backtest is the ``backtest_chart`` routine's job from every seat, the dashboard
+included (FEAT-076), so this module
 makes no call to the Hummingbot API at all: a run is submitted through
 ``POST /api/v1/routines/run`` and read back from here once it has completed.
 """
@@ -15,8 +16,9 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from condor.backtest_store import get_backtest_store
 from condor.backtesting import normalize_backtest_task
-from condor.web.auth import get_current_user
-from condor.web.models import WebUser
+from condor.reports import list_reports, subjects
+from condor.web.auth import get_current_user, report_owner_filter
+from condor.web.models import ReportsListResponse, ReportSummary, WebUser
 from config_manager import ServerPermission, get_config_manager
 
 logger = logging.getLogger(__name__)
@@ -112,6 +114,32 @@ def _archived_or_404(task_id: str, user: WebUser) -> dict:
     if not server or server not in _accessible_servers(user.id):
         raise HTTPException(status_code=404, detail="Backtest not found")
     return summary
+
+
+@router.get(
+    "/backtesting/archive/{task_id}/reports", response_model=ReportsListResponse
+)
+async def get_backtest_reports(
+    task_id: str,
+    user: WebUser = Depends(get_current_user),
+):
+    """Reports about this stored task, even after its routine instance is gone.
+
+    Server access and report ownership are separate boundaries: seeing a
+    server's archived metrics does not grant access to another user's reports.
+    Old reports without a task subject remain unlinked; never guess by title
+    or timestamp. The existing report index is the only association store.
+    """
+    _archived_or_404(task_id, user)
+    entries, total = list_reports(
+        source_type="routine",
+        source_name="backtest_chart",
+        subject=subjects.backtest(task_id),
+        owner_id=report_owner_filter(user),
+    )
+    return ReportsListResponse(
+        reports=[ReportSummary(**entry) for entry in entries], total=total
+    )
 
 
 @router.get("/backtesting/archive/{task_id}")

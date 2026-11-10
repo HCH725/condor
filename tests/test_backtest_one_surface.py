@@ -140,9 +140,15 @@ class FakeContext:
 
 class FakeReportBuilder:
     saved: list[str] = []
+    saved_subjects: list[str] = []
 
     def __init__(self, title="Report"):
         self.title = title
+        self.subject_key = ""
+
+    def subject(self, key):
+        self.subject_key = key
+        return self
 
     def source(self, *a, **k):
         return self
@@ -158,6 +164,7 @@ class FakeReportBuilder:
 
     async def save(self, report_id=None):
         FakeReportBuilder.saved.append(self.title)
+        FakeReportBuilder.saved_subjects.append(self.subject_key)
         return "report-1"
 
 
@@ -184,6 +191,7 @@ def stubs(monkeypatch):
     monkeypatch.setattr(bc, "generate_chart", fake_generate_chart)
     monkeypatch.setattr(reports_mod, "ReportBuilder", FakeReportBuilder)
     FakeReportBuilder.saved = []
+    FakeReportBuilder.saved_subjects = []
     return calls
 
 
@@ -209,6 +217,12 @@ def routine(monkeypatch, store, stubs):
 
 def _completed(task_id="task-1") -> FakeClient:
     return FakeClient(FakeBacktesting(task_id, [_envelope(task_id)]))
+
+
+def test_backtest_report_records_the_task_as_a_persistent_subject(routine):
+    result = routine(_completed(), chart=False)
+    assert result.table_data[0]["task_id"] == "task-1"
+    assert FakeReportBuilder.saved_subjects == ["backtest:task-1"]
 
 
 # ── One surface, reachable from every seat ────────────────────────────────────

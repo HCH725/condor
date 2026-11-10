@@ -197,17 +197,25 @@ async def test_list_backtests_filters_by_server_and_caps(monkeypatch):
 async def test_get_backtest_never_pulls_the_chart_payload(monkeypatch):
     calls = _api(
         monkeypatch,
-        lambda method, path, body: {
-            "summaries": [
-                {"task_id": "t9", "server": "local", "metrics": {"net_pnl": 1}}
-            ]
-        },
+        lambda method, path, body: (
+            {
+                "summaries": [
+                    {"task_id": "t9", "server": "local", "metrics": {"net_pnl": 1}}
+                ]
+            }
+            if path == "/backtesting/archive"
+            else {"reports": [], "total": 0}
+        ),
     )
 
     result = await research.get_backtest("t9")
 
     assert result["task_id"] == "t9"
-    assert [c["path"] for c in calls] == ["/backtesting/archive"]
+    assert [c["path"] for c in calls] == [
+        "/backtesting/archive",
+        "/backtesting/archive/t9/reports",
+    ]
+    assert result["report_id"] is None  # Legacy entries are not guessed.
 
 
 @pytest.mark.asyncio
@@ -230,7 +238,14 @@ async def test_archive_summary_reads_the_dashboards_nested_shape(monkeypatch):
         },
         "metrics": {"net_pnl": 1},
     }
-    _api(monkeypatch, lambda method, path, body: {"summaries": [entry]})
+    _api(
+        monkeypatch,
+        lambda method, path, body: (
+            {"summaries": [entry]}
+            if path == "/backtesting/archive"
+            else {"reports": [], "total": 0}
+        ),
+    )
 
     result = await research.get_backtest("t9")
 
@@ -240,6 +255,26 @@ async def test_archive_summary_reads_the_dashboards_nested_shape(monkeypatch):
     assert result["connector"] == "binance_perpetual"
     assert result["start_time"] == 100
     assert result["resolution"] == "1m"
+
+
+@pytest.mark.asyncio
+async def test_get_backtest_recovers_report_without_a_live_instance(monkeypatch):
+    def handler(method, path, body):
+        if path == "/backtesting/archive":
+            return {"summaries": [{"task_id": "t9", "server": "local"}]}
+        if path == "/backtesting/archive/t9/reports":
+            return {
+                "reports": [{"id": "r-9", "source_name": "backtest_chart"}],
+                "total": 1,
+            }
+        raise AssertionError(path)
+
+    calls = _api(monkeypatch, handler)
+    result = await research.get_backtest("t9")
+    assert result["report_id"] == "r-9"
+    assert "routine=backtest_chart&report=r-9" in result["dashboard_url"]
+    assert all(c["method"] == "GET" for c in calls)
+    assert not any("/instances/" in c["path"] for c in calls)
 
 
 @pytest.mark.asyncio

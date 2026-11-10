@@ -35,7 +35,7 @@ of calling the Hummingbot API directly.
 | `submit_backtest` | write (one routine) | Starts the stock `backtest_chart` routine; returns `instance_id` and a `?run=` link |
 | `backtest_status` | read | Status, error, metrics table, `report_id`, `?run=` link. Refuses non-`backtest_chart` instances |
 | `list_backtests` | read | Archived runs for one server, newest first, summary metrics only |
-| `get_backtest` | read | One archived run's parameters + metrics from the archive index (never the chart payload) |
+| `get_backtest` | read | One archived run's parameters + metrics, plus its latest accessible report id and Dashboard link (works after restart) |
 | `get_report` | read | Backtest report metadata + `?report=` link. Refuses reports from other sources |
 
 There is deliberately **no** generic `run_routine`, `run_code`, scheduler,
@@ -110,7 +110,24 @@ Both link shapes are the real ones the SPA reads (`frontend/src/pages/Routines.t
   this verification).
 - `backtest_status` returned `report_id=33fa4a`; `GET /reports/33fa4a/html`
   returned 200 with the Plotly chart; `/routines?report=33fa4a` returned the SPA.
-- `tests/test_research_mcp.py`: 24 tests, including refusal paths.
+- `tests/test_research_mcp.py` pins the six-tool surface, fixed submission,
+  source verification, archive summaries, and durable report lookup.
+- `tests/test_backtest_report_link.py` persists real reports to isolated disk,
+  reopens the archive, and checks task lookup, owner isolation, denied servers,
+  legacy records, and pruned reports.
+
+### Restart acceptance
+
+1. Submit one saved controller config through the research MCP server.
+2. Wait for completion; save its task id, report id, archive count, metric hash,
+   and report HTML hash.
+3. Confirm no running routines, bots, or agent loops before restarting Condor.
+4. Restart Condor and reconnect the MCP client.
+5. Confirm the old in-memory instance is missing, then call `get_backtest(task_id)`.
+6. Require the same report id, unchanged metric and HTML hashes, valid Plotly
+   report HTML, and unchanged archive count (no duplicate submission).
+7. Repeat the archive lookup from the actual long-lived Hermes host, not only
+   a standalone CLI probe.
 
 ## Known limits (first version)
 
@@ -123,12 +140,23 @@ Both link shapes are the real ones the SPA reads (`frontend/src/pages/Routines.t
   gateway's.
 - No report HTML over MCP. A model gets the metrics, the title and the link; the
   chart stays in the dashboard.
-- **`task_id → report_id` is not persisted.** The report id lives on the routine
-  instance in memory; after a Condor restart you can still read the archived
-  run's parameters and metrics, but not rediscover its report id. Keep the report
-  link (or take it from `backtest_status` while the run is known). Closing this
-  needs a change in Condor itself (e.g. stamping the task id into the report
-  subject), not a gateway tweak.
+- **Durable task → report lookup.** New backtest reports stamp the task id into
+  the existing report index using `subjects.backtest(task_id)`. The native
+  `GET /api/v1/backtesting/archive/{task_id}/reports` endpoint checks both server
+  access and report ownership; `get_backtest` uses it to recover the latest
+  accessible report id and Dashboard URL, even after the routine instance is
+  gone. No extra database or duplicate mapping store is introduced.
+- Old reports without a task subject remain unlinked (`report_id: null`); no
+  title/date guessing or automatic backfill. Rendering the saved task again
+  with the native `backtest_chart(task_id=...)` workflow produces a linked
+  report without rerunning the engine. Existing report retention/pruning still
+  applies; an expired report is an empty lookup, not a reason to resubmit.
+- A failed/missing in-memory instance is not proof a saved backtest failed. On
+  restart, recover by task id through the archive; do not automatically repeat
+  `submit_backtest`.
+- After source updates, reload the MCP connection as well as the Condor service;
+  a standalone CLI handshake does not update an already running host's stdio
+  child. Verify that host's `get_backtest` returns the persisted `report_id`.
 - The source check defends against an accidental local shadow, not against a
   same-user actor who can edit both the local routine and the stock file — the
   gateway runs with the operator's own identity by design.

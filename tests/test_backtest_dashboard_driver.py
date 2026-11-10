@@ -23,6 +23,11 @@ def test_the_web_route_makes_no_call_to_the_hummingbot_api():
 
 def test_only_the_archive_routes_survive():
     paths = {route.path for route in web.router.routes}
-    assert paths == {"/backtesting/archive", "/backtesting/archive/{task_id}"}
+    assert paths == {
+        "/backtesting/archive",
+        "/backtesting/archive/{task_id}",
+        "/backtesting/archive/{task_id}/reports",
+    }
+    assert all("POST" not in route.methods for route in web.router.routes)
     # The submit route's request model went with it.
     assert not hasattr(web, "SubmitBacktestRequest")

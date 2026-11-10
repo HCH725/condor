@@ -1374,10 +1374,12 @@ async def _render(
     text = format_summary(bt_results, config)
 
     # Generate web report
-    from condor.reports import ReportBuilder
+    from condor.reports import ReportBuilder, subjects
 
     builder = ReportBuilder(title=f"Backtest: {config.config_name}")
     builder.source("routine", "backtest_chart").tags(["backtest"])
+    if config.task_id:
+        builder.subject(subjects.backtest(config.task_id))
     builder.markdown(text)
     if fig is not None:
         builder.plotly(fig)

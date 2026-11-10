@@ -12,6 +12,11 @@ server-side from those parts rather than accepting a pre-built key.
 from __future__ import annotations
 
 
+def backtest(task_id: str) -> str:
+    """A stored backtest (the archive is keyed by task id across this install)."""
+    return "backtest:" + task_id
+
+
 def bot_run(server: str, db_path: str, controller_id: str = "") -> str:
     """The subject key for an archived run, or one controller inside it."""
     return "bot_run:" + "|".join((server, db_path, controller_id))
