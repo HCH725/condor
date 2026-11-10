@@ -26,6 +26,7 @@ import json
 import math
 import re
 from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
@@ -44,6 +45,18 @@ ROUTINE_NAME = "backtest_chart"
 #: a longer candle fetch inside one tool call, and this gateway is not the place
 #: to discover that limit with the user waiting.
 MAX_WINDOW_DAYS = 31
+
+#: The shipped definition, used to prove the main process really resolved this
+#: file. ``source`` on a listed routine is ``"global"`` for every non-agent
+#: routine — including a local file that shadows a shipped name — so it cannot
+#: tell the two apart (``routines/base.py:577-624``). The source text can.
+STOCK_ROUTINE = (
+    Path(__file__).resolve().parents[2]
+    / "agents"
+    / "_shared"
+    / "routines"
+    / "backtest_chart.py"
+)
 
 RESOLUTIONS = ("1m", "5m", "15m", "1h")
 
@@ -170,8 +183,21 @@ def _dashboard_url() -> str:
     return f"http://127.0.0.1:{WEB_PORT}"
 
 
+def _stock_source() -> str | None:
+    """The shipped routine's text, or None when this host cannot read it."""
+    try:
+        return STOCK_ROUTINE.read_text()
+    except OSError:
+        return None
+
+
 async def _routine_row() -> dict:
-    """The discovered ``backtest_chart`` row — or a refusal to run anything."""
+    """The discovered ``backtest_chart`` row — or a refusal to run anything.
+
+    ``source == "global"`` is not enough: a local file that shadows a shipped
+    routine keeps that label, so the only honest check is comparing the source
+    the main process actually resolved against the file on disk.
+    """
     routines = await call_main_api("GET", "/routines")
     row = None
     if isinstance(routines, list):
@@ -189,10 +215,18 @@ async def _routine_row() -> dict:
         raise ToolError(
             f"{ROUTINE_NAME} is waiting for operator consent on this install"
         )
-    if row.get("source") != "global":
+
+    expected = _stock_source()
+    if expected is None:
         raise ToolError(
-            f"{ROUTINE_NAME} is shadowed by a local definition "
-            f"(source={row.get('source')!r}); refusing to run code this gateway "
+            f"cannot read the shipped {ROUTINE_NAME} from disk; refusing to run "
+            "a routine this gateway cannot verify"
+        )
+    resolved = await call_main_api("GET", f"/routines/{ROUTINE_NAME}/source")
+    if not isinstance(resolved, dict) or resolved.get("source") != expected:
+        raise ToolError(
+            f"{ROUTINE_NAME} does not match the shipped definition (a local "
+            "override is shadowing it); refusing to run code this gateway "
             "cannot identify. Run it from the dashboard instead."
         )
     return row
@@ -431,7 +465,8 @@ async def get_report(report_id: str) -> dict:
         "tags": report.get("tags") or [],
         "subject": report.get("subject", ""),
         "agent": report.get("agent", ""),
-        "dashboard_url": f"{_dashboard_url()}/routines?report={quote(rid, safe='')}",
+        "dashboard_url": f"{_dashboard_url()}/routines?routine={ROUTINE_NAME}"
+        f"&report={quote(rid, safe='')}",
     }
 
 

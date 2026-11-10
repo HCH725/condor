@@ -33,6 +33,8 @@ def _api(monkeypatch, handler):
 def _submit_handler(method, path, body):
     if path == "/routines":
         return ROUTINES
+    if path == "/routines/backtest_chart/source":
+        return {"filename": "backtest_chart.py", "source": research._stock_source()}
     if path == "/routines/run":
         return {"instance_id": "i-abc123"}
     raise AssertionError(f"unexpected call {method} {path}")
@@ -71,15 +73,21 @@ async def test_submit_posts_only_the_backtest_routine(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_submit_refuses_a_locally_shadowed_routine(monkeypatch):
-    shadowed = [dict(ROUTINES[0], source="local")]
+    """A local file shadowing the name keeps source='global', so the text must match."""
     calls = _api(
         monkeypatch,
         lambda method, path, body: (
-            shadowed if path == "/routines" else {"instance_id": "x"}
+            ROUTINES
+            if path == "/routines"
+            else (
+                {"source": "# a locally shadowed backtest_chart\n"}
+                if path == "/routines/backtest_chart/source"
+                else {"instance_id": "x"}
+            )
         ),
     )
 
-    with pytest.raises(ToolError, match="shadowed"):
+    with pytest.raises(ToolError, match="shipped"):
         await research.submit_backtest("conf", "2025-04-22", "2025-04-23")
 
     assert not [c for c in calls if c["method"] == "POST"]
@@ -88,7 +96,7 @@ async def test_submit_refuses_a_locally_shadowed_routine(monkeypatch):
 @pytest.mark.asyncio
 async def test_submit_refuses_a_routine_awaiting_consent(monkeypatch):
     pending = [dict(ROUTINES[0], pending=True)]
-    _api(monkeypatch, lambda method, path, body: pending)
+    _api(monkeypatch, lambda method, path, body: pending if path == "/routines" else {})
 
     with pytest.raises(ToolError, match="consent"):
         await research.submit_backtest("conf", "2025-04-22", "2025-04-23")
@@ -268,7 +276,8 @@ async def test_get_report_returns_a_dashboard_link(monkeypatch):
     result = await research.get_report("r-1")
 
     assert result["title"] == "Backtest: conf"
-    assert "?report=r-1" in result["dashboard_url"]
+    assert "routine=backtest_chart" in result["dashboard_url"]
+    assert "report=r-1" in result["dashboard_url"]
 
 
 @pytest.mark.asyncio
@@ -276,6 +285,8 @@ async def test_catalog_hides_connection_details(monkeypatch):
     def handler(method, path, body):
         if path == "/routines":
             return ROUTINES
+        if path == "/routines/backtest_chart/source":
+            return {"source": research._stock_source()}
         if path == "/servers":
             return [
                 {
@@ -303,11 +314,11 @@ async def test_catalog_hides_connection_details(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_catalog_still_lists_configs_when_submission_is_refused(monkeypatch):
-    shadowed = [dict(ROUTINES[0], source="local")]
-
     def handler(method, path, body):
         if path == "/routines":
-            return shadowed
+            return ROUTINES
+        if path == "/routines/backtest_chart/source":
+            return {"source": "# shadowed\n"}
         if path == "/servers":
             return [{"name": "local", "online": True}]
         if path.startswith("/routines/options/controller_configs"):
@@ -318,7 +329,7 @@ async def test_catalog_still_lists_configs_when_submission_is_refused(monkeypatc
     result = await research.research_catalog("local")
 
     assert result["backtest_available"] is False
-    assert "shadowed" in result["reason"]
+    assert "shipped" in result["reason"]
     assert result["controller_configs"] == ["conf_a"]
 
 

@@ -44,14 +44,17 @@ cannot talk this process into an action that is not one of the six.
 
 ## Trust boundary
 
-- **Fixed routine, stock only.** `submit_backtest` always names
-  `backtest_chart` and refuses when the discovered definition's `source` is not
-  `global` — a local or agent routine that shadows the name is different code,
-  and this gateway will not start code it cannot identify. A pending
-  (consent-awaiting) routine is refused for the same reason.
-- **No chat side effects.** The run is submitted with `on_complete="notify"` and
-  no `session_key`, so there is no conversation to notify: no Telegram or
-  dashboard message is produced by an external submission.
+- **Fixed routine, stock code only.** `submit_backtest` always names
+  `backtest_chart`. A local file can shadow a shipped routine and still reports
+  `source == "global"`, so before every submission the gateway compares the
+  source the main process actually resolved (`GET /routines/backtest_chart/source`)
+  with `agents/_shared/routines/backtest_chart.py` on disk, byte for byte. A
+  mismatch (or a missing stock file) is refused. A pending (consent-awaiting)
+  routine is refused for the same reason.
+- **No chat wake or message.** The run is submitted with `on_complete="notify"`
+  and no `session_key`, so there is no conversation to notify. A per-user routine
+  hook the operator configured earlier would still fire on completion — that is
+  the operator's own configuration, not something this gateway adds.
 - **`chart: false`.** No PNG is pushed anywhere; the interactive Plotly chart is
   still written into the web report (`report_id`).
 - **Bounded inputs.** Names/ids reject `..`, `/`, `\`, `?`, `#`, `%` and control
@@ -92,7 +95,10 @@ reaches the main process as an unknown user and fails with 403.
 Both link shapes are the real ones the SPA reads (`frontend/src/pages/Routines.tsx`):
 
 - a run in flight or just finished: `/routines?run=<instance_id>`
-- a finished report: `/routines?report=<report_id>`
+- a finished report: `/routines?routine=backtest_chart&report=<report_id>`
+
+(`/reports` itself is only a redirect to `/routines?tab=reports`; there is no
+`/reports/<id>` page.)
 
 ## Verified end to end
 
@@ -117,5 +123,14 @@ Both link shapes are the real ones the SPA reads (`frontend/src/pages/Routines.t
   gateway's.
 - No report HTML over MCP. A model gets the metrics, the title and the link; the
   chart stays in the dashboard.
+- **`task_id → report_id` is not persisted.** The report id lives on the routine
+  instance in memory; after a Condor restart you can still read the archived
+  run's parameters and metrics, but not rediscover its report id. Keep the report
+  link (or take it from `backtest_status` while the run is known). Closing this
+  needs a change in Condor itself (e.g. stamping the task id into the report
+  subject), not a gateway tweak.
+- The source check defends against an accidental local shadow, not against a
+  same-user actor who can edit both the local routine and the stock file — the
+  gateway runs with the operator's own identity by design.
 - The demo controller config (`research_bollinger_v1`) is ordinary Hummingbot
   data and can be deleted from the dashboard when it is no longer useful.
